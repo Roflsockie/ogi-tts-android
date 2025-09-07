@@ -1,5 +1,20 @@
 # OGI TTS Android - Релиз 1.4 (Интеллектуальная фильтрация голосов)
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Roflsockie/ogi-tts-android/main/OGI%20TTS.png" alt="OGI TTS Logo" width="150"/>
+</p>
+
+<p align="center">
+  <strong>Улучшенное Android приложение для преобразования текста в речь</strong>
+</p>
+
+## 📱 Скриншоты интерфейса
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Roflsockie/ogi-tts-android/main/screen1.jpg" alt="Главный экран" width="180"/>
+  <img src="https://raw.githubusercontent.com/Roflsockie/ogi-tts-android/main/screen2.jpg" alt="Выбор голоса" width="180"/>
+</div>
+
 ## 📱 Описание
 Улучшенное Android приложение для преобразования текста в речь с интеллектуальной фильтрацией голосов по языку и определением пола. Поддерживает импорт документов Word (.docx), автоматический выбор оптимального голоса, воспроизведение и сохранение аудио.
 
@@ -133,7 +148,7 @@
 *Совместимость: Android 8.0+*
 
 ## 📥 Скачать APK
-[⬇️ OGI_TTS_Android_v1.4_2025-09-07.apk](https://github.com/YOUR_USERNAME/YOUR_REPO/releases/download/v1.4/OGI_TTS_Android_v1.4_2025-09-07.apk)
+[⬇️ OGI_TTS_Android_v1.4_2025-09-07.apk](https://github.com/Roflsockie/ogi-tts-android-releases/releases/download/v1.4/OGI_TTS_Android_v1.4_2025-09-07.apk)
 
 ## 🔗 Другие версии и платформы
 - **ПК портативная версия** - https://drive.google.com/file/d/1HrIOxoS2PEozUk4w_8L01ms2hqJZTziL/view?usp=drive_link
