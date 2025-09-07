@@ -1,0 +1,52 @@
+# Android
+*.apk
+*.ap_
+*.dex
+
+# Gradle
+.gradle/
+build/
+gradle-app.setting
+!gradle-wrapper.jar
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Local configuration
+local.properties
+
+# Keystore
+*.jks
+*.keystore
+
+# ProGuard
+proguard/
+*.mapping
+
+# Test results
+app/build/test-results/
+app/build/reports/
+
+# Kotlin
+.kotlin/
+
+# Backup files
+*.bak
+*.backup

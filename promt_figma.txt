@@ -1,0 +1,248 @@
+# Figma Design Prompt: OGI TTS Android App Interface
+
+## Project Overview
+Create a modern Android app interface for OGI TTS (Text-to-Speech) application using Material Design 3 principles. The app should have a dark theme and clean, intuitive layout.
+
+## Color Scheme (Based on App's Color.kt)
+- **Primary Background:** Dark gray (#121212) - OgiBackgroundDark
+- **Surface:** Dark gray-blue (#1E1E1E) - OgiSurfaceDark
+- **Primary Color:** Bright blue (#64B5F6) - OgiPrimaryDarkTheme
+- **Secondary Color:** Bright teal (#26A69A) - OgiSecondaryDarkTheme
+- **Accent:** Orange (#FF6F00) - OgiAccent
+- **Text Primary:** White (#FFFFFF)
+- **Text Secondary:** Light gray (#B3B3B3)
+- **Error:** Red (#D32F2F) - OgiError
+- **Success:** Green (#4CAF50)
+
+## Typography
+- **Headline Large:** Roboto, 32px, Bold, White
+- **Headline Medium:** Roboto, 24px, Medium, White
+- **Title Large:** Roboto, 22px, Regular, White
+- **Body Large:** Roboto, 16px, Regular, Light Gray
+- **Body Medium:** Roboto, 14px, Regular, Light Gray
+- **Label Large:** Roboto, 14px, Medium, White
+
+## Main Screens
+
+### Screen 1: Welcome Screen (Permissions Request)
+**Layout:** Full screen centered content
+**Background:** Dark gradient from #121212 to #1E1E1E
+
+**Elements:**
+1. **Icon/Logo** (Top center)
+   - Size: 120x120px
+   - Style: Modern speech bubble icon with sound waves
+   - Color: Primary blue
+
+2. **Main Title** (Below icon)
+   - Text: "Welcome to OGI TTS Android!"
+   - Typography: Headline Large
+   - Alignment: Center
+   - Max width: 300px
+
+3. **Description Text** (Below title)
+   - Text: "The application needs access to files for importing texts and saving audio. Please grant the permissions."
+   - Typography: Body Large
+   - Alignment: Center
+   - Max width: 320px
+   - Line height: 24px
+
+4. **Grant Permissions Button** (Bottom center)
+   - Size: 200x56px
+   - Background: Bright blue (#64B5F6) - OgiPrimaryDarkTheme
+   - Text: "Grant Permissions"
+   - Typography: Label Large, White
+   - Corner radius: 16px
+   - Elevation: 4dp shadow
+
+### Screen 2: Main TTS Interface
+**Layout:** Full screen with top controls, main content area, and bottom actions
+**Background:** Dark (#121212)
+
+#### Top Section (Status Bar Area)
+1. **Voice Selector Dropdown** (Top left to center)
+   - Size: Full width - 32px padding
+   - Height: 56px
+   - Background: Surface (#1E1E1E)
+   - Border: 1px light gray
+   - Corner radius: 8px
+   - Text: "Select voice" (when collapsed)
+   - Dropdown arrow: Material Design chevron
+
+2. **Language Indicator** (Below voice selector)
+   - Text: "Detected language: English"
+   - Typography: Body Medium
+   - Color: Secondary blue
+
+3. **TTS Status** (Below language indicator)
+   - Text: "TTS Status: Ready"
+   - Typography: Body Medium
+   - Color: Success green
+
+#### Control Panel (Below status, full width)
+**Background:** Semi-transparent surface
+**Layout:** Horizontal row with 5 buttons + spacer
+
+4. **Play/Stop Button**
+   - Size: 48x48px
+   - Background: Circular, Bright blue (#64B5F6) when enabled
+   - Icon: Play (▶️) or Stop (⏹️)
+   - State: Disabled when no voice selected
+
+5. **Import File Button**
+   - Size: 48x48px
+   - Background: Circular, Bright blue (#64B5F6)
+   - Icon: File Upload (📁)
+   - Ripple effect on press
+
+6. **Audio List Toggle Button**
+   - Size: 48x48px
+   - Background: Circular, Bright blue (#64B5F6)
+   - Icon: Audio File (🎵) or Queue Music (🎶)
+   - State: Changes icon based on list visibility
+
+7. **Spacer** (Flexible space)
+
+8. **Instructions Button**
+   - Size: 48x48px
+   - Background: Circular, Bright blue (#64B5F6)
+   - Icon: Info (ℹ️)
+
+#### Main Content Area (Center, flexible height)
+9. **Text Input Field**
+   - Size: Full width, flexible height (min 120px)
+   - Background: Surface (#1E1E1E)
+   - Border: 1px light gray
+   - Corner radius: 8px
+   - Label: "Text to synthesize"
+   - Typography: Body Large
+   - Multi-line support
+   - Scroll when content overflows
+
+10. **Loading Indicator** (When importing file)
+    - Circular progress spinner
+    - Text: "Loading file..."
+    - Centered in text field area
+
+11. **Synthesis Indicator** (When creating audio)
+    - Large circular progress (64px)
+    - Text: "Synthesizing speech..."
+    - Centered in text field area
+
+#### Bottom Section (Bottom of screen)
+12. **Export Audio Button**
+    - Size: Full width - 32px
+    - Height: 56px
+    - Background: Bright blue (#64B5F6) - OgiPrimaryDarkTheme
+    - Text: "Export Audio"
+    - Icon: Download (⬇️) left of text
+    - Corner radius: 16px
+    - Elevation: 4dp shadow
+    - State: Disabled when no text or voice
+
+13. **Save Location Info**
+    - Text: "Files saved to: Downloads/TTS_Audio"
+    - Typography: Body Small
+    - Color: Text Secondary
+    - Alignment: Center
+
+#### Audio Files List (When toggled visible)
+14. **Audio File Item** (Repeatable component)
+    - Size: Full width
+    - Height: 72px
+    - Background: Surface (#1E1E1E)
+    - Border radius: 8px
+    - Margin: 8px
+
+    **Internal Layout:**
+    - **File Name** (Left, 60% width)
+      - Typography: Body Large
+      - Color: White
+      - Truncate with ellipsis if too long
+
+    - **Play Button** (Right side)
+      - Size: 40x40px
+      - Background: Circular, Bright blue (#64B5F6)
+      - Icon: Play (▶️) or Stop (⏹️)
+
+    - **Share Button** (Right of Play)
+      - Size: 40x40px
+      - Background: Circular, Bright teal (#26A69A)
+      - Icon: Share (📤)
+
+    - **Delete Button** (Right of Share)
+      - Size: 40x40px
+      - Background: Circular, Error red (#D32F2F)
+      - Icon: Delete (🗑️)
+
+### Screen 3: Instructions Dialog
+**Layout:** Modal dialog overlay
+**Background:** Semi-transparent black overlay
+
+15. **Dialog Container**
+    - Size: 360x500px (responsive)
+    - Background: Surface (#1E1E1E)
+    - Corner radius: 16px
+    - Elevation: 8dp shadow
+
+    **Content:**
+    - **Title:** "Instructions / Инструкции"
+    - **Scrollable Content Area**
+      - English instructions (6 steps)
+      - Russian instructions (6 steps)
+      - Typography: Body Medium
+      - Line spacing: 8px
+
+    - **OK Button** (Bottom)
+      - Size: 120x48px
+      - Background: Bright blue (#64B5F6)
+      - Corner radius: 8px
+
+## Interactive States
+
+### Button States
+- **Normal:** Default colors
+- **Pressed:** 10% darker with ripple effect
+- **Disabled:** 50% opacity, gray colors
+- **Focused:** Blue border highlight
+
+### Text Field States
+- **Normal:** Light gray border
+- **Focused:** Blue border (2px)
+- **Error:** Red border
+- **Disabled:** Gray background, reduced opacity
+
+### Dropdown States
+- **Collapsed:** Default surface color
+- **Expanded:** Blue border, show menu items
+- **Menu Items:** Hover effects, selection highlight
+
+## Animations & Transitions
+- **Button Press:** 100ms scale down to 95%
+- **Screen Transitions:** 300ms fade in/out
+- **Dialog Appearance:** 200ms scale from 90% to 100%
+- **Progress Indicators:** Smooth rotation
+- **List Items:** 150ms slide in from bottom
+
+## Icons & Assets
+- Use Material Design Icons
+- Consistent 24x24px icon size in buttons
+- Custom OGI TTS logo for welcome screen
+- Sound wave visualization elements
+
+## Responsive Design
+- **Mobile:** Standard Android layout
+- **Tablet:** Center content with max width 600px
+- **Landscape:** Adjust button layouts, stack vertically if needed
+
+## Accessibility
+- All interactive elements have proper touch targets (48x48dp minimum)
+- Sufficient color contrast ratios
+- Screen reader friendly labels
+- Keyboard navigation support
+
+## Export Requirements
+- Export as Figma components for reusability
+- Include variants for different states
+- Add auto-layout for responsive behavior
+- Create a design system with shared styles
