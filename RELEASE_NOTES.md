@@ -156,7 +156,7 @@ https://send.monobank.ua/jar/69c8gYDdWB
 *Совместимость: Android 8.0+*
 
 ## 📥 Скачать APK
-[⬇️ OGI_TTS_Android_v1.4_2025-09-07.apk](https://github.com/Roflsockie/ogi-tts-android-releases/releases/download/v1.4/OGI_TTS_Android_v1.4_2025-09-07.apk)
+[⬇️ OGI_TTS_Android_v1.4_2025-09-07.apk](https://github.com/Roflsockie/ogi-tts-android/releases/download/v1.4/OGI_TTS_Android_v1.4_2025-09-07.apk)
 
 ## 🔗 Другие версии и платформы
 - **ПК портативная версия** - https://drive.google.com/file/d/1HrIOxoS2PEozUk4w_8L01ms2hqJZTziL/view?usp=drive_link

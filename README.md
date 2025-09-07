@@ -17,7 +17,7 @@
 
 ## 📥 Скачать последнюю версию
 
-[⬇️ OGI_TTS_Android_v1.4.apk](https://github.com/Roflsockie/ogi-tts-android-releases/releases/download/v1.4/OGI_TTS_Android_v1.4_2025-09-07.apk)
+[⬇️ OGI_TTS_Android_v1.4.apk](https://github.com/Roflsockie/ogi-tts-android/releases/download/v1.4/OGI_TTS_Android_v1.4_2025-09-07.apk)
 
 ## ✨ Возможности
 

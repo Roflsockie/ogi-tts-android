@@ -9,7 +9,7 @@ $Version = "v1.4"
 $Title = "OGI TTS Android v1.4 - Интеллектуальная фильтрация голосов"
 $ApkFile = "OGI_TTS_Android_v1.4_2025-09-07.apk"
 $NotesFile = "RELEASE_NOTES.md"
-$RepoName = "ogi-tts-android-releases"  # Репозиторий только для релизов
+$RepoName = "ogi-tts-android"  # Используем существующий репозиторий
 $ProjectPath = "M:\AI\Releases"  # Работаем только с папкой Releases
 
 # Проверка наличия файлов
