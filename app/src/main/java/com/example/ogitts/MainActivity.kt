@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,6 +18,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,12 +34,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -72,10 +80,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.animation.core.*
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.offset
@@ -120,6 +140,12 @@ fun getLanguageName(code: String): String {
 // Функция для определения пола голоса
 fun detectVoiceGender(voiceName: String): String {
     val name = voiceName.lowercase()
+
+    // Метки вида "ru-supertonic-F1" или "voice_m3"
+    val styleSuffix = Regex("[-_]([mf])(\\d+)$").find(name)
+    if (styleSuffix != null) {
+        return if (styleSuffix.groupValues[1] == "m") "male" else "female"
+    }
 
     // Проверяем явные указания пола
     if (name.contains("female") || name.contains("woman") || name.contains("girl")) {
@@ -178,15 +204,124 @@ fun filterVoicesByLanguage(voices: Set<Voice>, languageCode: String): List<Voice
     }.sortedBy { it.name }
 }
 
-// Функция для получения отображаемого имени голоса с полом
-fun getVoiceDisplayName(voice: Voice): String {
-    val gender = detectVoiceGender(voice.name)
-    val genderText = when (gender) {
-        "male" -> "\"male\""
-        "female" -> "\"female\""
-        else -> "\"unknown\""
+// Компактная подпись голоса в стиле "Svetlana - offline - ru"
+
+// Код языка/страны для подписи: en-us -> "us", ru -> "ru"
+fun voiceLanguageCode(voice: Voice): String =
+    voice.locale.country?.lowercase()?.takeIf { it.isNotBlank() }
+        ?: voice.locale.language.lowercase()
+
+// Откуда голос: локально или через сеть
+fun voiceSourceTag(voice: Voice): String =
+    if (voice.isNetworkConnectionRequired) "online" else "offline"
+
+// Имена для голосов Supertonic (ru-supertonic-F1/M2), по номеру
+private val supertonicFemaleNames = listOf("Svetlana", "Anna", "Maria", "Olga", "Daria")
+private val supertonicMaleNames = listOf("Ivan", "Pavel", "Sergey", "Dmitri", "Nikolai")
+
+// Читаемое ли имя движка (не внутренний ID вида en-us-x-iom-local)
+private fun isReadableVoiceName(name: String): Boolean =
+    name.isNotBlank() && !name.contains("-x-") && !name.contains("supertonic-", ignoreCase = true)
+
+// Базовое имя голоса без статуса и языка
+fun voiceShortName(voice: Voice, indexInLocale: Int): String {
+    Regex("supertonic-([MFmf])([1-9])").find(voice.name)?.let { m ->
+        val female = m.groupValues[1].equals("F", ignoreCase = true)
+        val names = if (female) supertonicFemaleNames else supertonicMaleNames
+        val number = m.groupValues[2].toInt()
+        return names.getOrNull(number - 1) ?: "Голос $number"
     }
-    return "${voice.name} $genderText"
+    // Голос по умолчанию Google: en-US-language / ru-RU-language
+    if (voice.name.lowercase().endsWith("-language")) return "Авто"
+    if (isReadableVoiceName(voice.name)) return voice.name
+    // Google и другие ID без публичных имён: нумеруем внутри локали
+    return "Голос ${indexInLocale + 1}"
+}
+
+// Ключ пары local/network: один и тот же голос в двух версиях
+private fun twinKey(name: String): String =
+    name.lowercase().removeSuffix("-network").removeSuffix("-local")
+
+// Убрать сетевые дубли: если у голоса есть offline-версия, online-близнец не нужен
+fun dedupeVoiceTwin(voices: List<Voice>): List<Voice> {
+    val offlineKeys = voices.filter { !it.isNetworkConnectionRequired }.map { twinKey(it.name) }.toSet()
+    return voices.filter { !it.isNetworkConnectionRequired || twinKey(it.name) !in offlineKeys }
+}
+
+// Подписи всех голосов: voice.name -> "Svetlana - offline - ru"
+fun buildVoiceLabels(voices: Collection<Voice>): Map<String, String> {
+    val labels = mutableMapOf<String, String>()
+    voices.groupBy { it.locale.toLanguageTag() }.forEach { (_, group) ->
+        group.sortedBy { it.name }.forEachIndexed { index, voice ->
+            labels[voice.name] =
+                "${voiceShortName(voice, index)} - ${voiceSourceTag(voice)} - ${voiceLanguageCode(voice)}"
+        }
+    }
+    return labels
+}
+
+// Функция для получения отображаемого имени голоса с полом (запасной формат)
+fun getVoiceDisplayName(voice: Voice): String {
+    val parts = mutableListOf(voiceLocaleLabel(voice))
+    voiceGenderLabel(voice)?.let { parts += it }
+    parts += voiceSourceLabel(voice)
+    return parts.joinToString(" · ")
+}
+
+// Название языка и региона голоса: "English (United States)"
+fun voiceLocaleLabel(voice: Voice): String {
+    val locale = voice.locale
+    val language = Locale.forLanguageTag(locale.language)
+        .getDisplayLanguage(Locale.getDefault())
+        .replaceFirstChar { it.titlecase(Locale.getDefault()) }
+    val country = locale.displayCountry
+    return if (country.isNullOrBlank()) language else "$language ($country)"
+}
+
+// Пол голоса в понятном виде, null если определить нельзя
+fun voiceGenderLabel(voice: Voice): String? = when (detectVoiceGender(voice.name)) {
+    "male" -> "мужской"
+    "female" -> "женский"
+    else -> null
+}
+
+// Откуда голос: локально с устройства или через сеть
+fun voiceSourceLabel(voice: Voice): String =
+    if (voice.isNetworkConnectionRequired) "сеть" else "офлайн"
+
+// Группа голосов по названию языка
+data class VoiceGroup(val label: String, val voices: List<Voice>)
+
+// Группировка голосов по языку, язык текста - первым
+fun groupVoicesByLanguage(voices: List<Voice>, preferredLanguage: String): List<VoiceGroup> =
+    voices.groupBy { voiceLocaleLabel(it) }
+        .map { (label, group) -> VoiceGroup(label, group.sortedBy { it.name }) }
+        .sortedWith(
+            compareByDescending<VoiceGroup> { group ->
+                group.voices.any { it.locale.language == preferredLanguage }
+            }.thenBy { it.label }
+        )
+
+// Поиск голоса по названию, языку или полу
+fun matchVoiceQuery(voice: Voice, query: String): Boolean {
+    if (query.isBlank()) return true
+    return voice.name.contains(query, ignoreCase = true) ||
+        voiceLocaleLabel(voice).contains(query, ignoreCase = true) ||
+        (voiceGenderLabel(voice)?.contains(query, ignoreCase = true) == true)
+}
+
+// Понятное имя текущего TTS-движка
+fun ttsEngineLabel(context: Context): String {
+    val pkg = Settings.Secure.getString(context.contentResolver, "tts_default_synth")
+    return when (pkg) {
+        "com.google.android.tts" -> "Google TTS"
+        "com.brahmadeo.supertonic.tts" -> "Supertonic TTS"
+        "tts.smartvoice" -> "SmartVoice"
+        "com.nekospeak.tts" -> "NekoSpeak"
+        "org.woheller69.ttsengine" -> "SherpaTTS"
+        null -> "неизвестно"
+        else -> pkg
+    }
 }
 
 fun readFileContent(context: Context, uri: Uri): String {
@@ -557,30 +692,53 @@ fun WelcomeScreen(onPermissionsGranted: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MainScreen(voices: Set<Voice>, tts: TextToSpeech, isSynthesizing: Boolean, onSynthesize: (String) -> Unit, onAudioListRefresh: () -> Unit, ttsReady: Boolean, isPlaying: Boolean) {
     var text by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var selectedVoice by remember { mutableStateOf<Voice?>(null) }
-    var expanded by remember { mutableStateOf(false) }
+    var showVoiceSheet by remember { mutableStateOf(false) }
     var showAudioList by remember { mutableStateOf(false) }
     var refreshAudioList by remember { mutableStateOf(0) }
     var showInstructionsDialog by remember { mutableStateOf(false) }
+    var voiceQuery by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val voicePrefs = remember { context.getSharedPreferences("ogi_tts_prefs", Context.MODE_PRIVATE) }
     val audioFiles = remember(refreshAudioList) { getAudioFiles(context) }
     val detectedLanguage = remember(text) { detectLanguage(text) }
+    val engineLabel = ttsEngineLabel(context)
 
     // Фильтруем голоса по языку текста
     val filteredVoices = remember(detectedLanguage, voices) {
         filterVoicesByLanguage(voices, detectedLanguage)
     }
 
+    // Группируем голоса по языку (без сетевых дублей), применяем строку поиска
+    val displayVoices = remember(voices) { dedupeVoiceTwin(voices.toList()) }
+    val groupedVoices = remember(voiceQuery, detectedLanguage, displayVoices) {
+        groupVoicesByLanguage(displayVoices.filter { matchVoiceQuery(it, voiceQuery) }, detectedLanguage)
+    }
+
+    // Компактные подписи голосов: "Svetlana - offline - ru"
+    val voiceLabels = remember(displayVoices) { buildVoiceLabels(displayVoices) }
+
+    // Выбор голоса с сохранением между запусками
+    val selectVoice: (Voice) -> Unit = { voice ->
+        selectedVoice = voice
+        tts.voice = voice
+        voicePrefs.edit().putString("voice_name", voice.name).apply()
+    }
+
     // Автоматический выбор голоса на основе языка
     LaunchedEffect(detectedLanguage, voices) {
         if (voices.isNotEmpty() && selectedVoice == null) {
-            // Инициализируем голос при первом запуске
-            val defaultVoice = voices.find { it.locale.language == "en" } ?: voices.first()
+            // Инициализируем голос: сохранённый, иначе подходящий по языку текста
+            val savedVoice = voices.find { it.name == voicePrefs.getString("voice_name", null) }
+            val defaultVoice = savedVoice
+                ?: voices.find { it.locale.language == detectedLanguage }
+                ?: voices.find { it.locale.language == "en" }
+                ?: voices.first()
             selectedVoice = defaultVoice
             tts.voice = defaultVoice
         }
@@ -614,7 +772,7 @@ fun MainScreen(voices: Set<Voice>, tts: TextToSpeech, isSynthesizing: Boolean, o
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = OgiBackgroundDark
+        color = OgiAbBackground
     ) {
         Column(
             modifier = Modifier
@@ -623,137 +781,330 @@ fun MainScreen(voices: Set<Voice>, tts: TextToSpeech, isSynthesizing: Boolean, o
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Выбор голоса с улучшенным дизайном
+            // Выбор голоса (стиль A): панель, тонкая рамка, акцентная точка
             Box {
                 OutlinedTextField(
-                    value = if (selectedVoice != null) getVoiceDisplayName(selectedVoice!!) else "Select voice",
+                    value = selectedVoice?.let { voiceLabels[it.name] ?: getVoiceDisplayName(it) } ?: "Выберите голос",
                     onValueChange = {},
                     readOnly = true,
-                    trailingIcon = {
-                        IconButton(onClick = { expanded = !expanded }) {
-                            Icon(
-                                imageVector = if (expanded) Icons.Filled.ArrowDropUp else Icons.Filled.ArrowDropDown,
-                                contentDescription = "Dropdown",
-                                tint = OgiTextSecondary
-                            )
-                        }
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = OgiAbText),
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .background(OgiAbAccent, CircleShape)
+                        )
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowDropDown,
+                            contentDescription = "Список голосов",
+                            tint = OgiAbTextMuted
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(8.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = OgiPrimaryDarkTheme,
-                        unfocusedBorderColor = OgiTextSecondary,
-                        focusedTextColor = OgiTextPrimary,
-                        unfocusedTextColor = OgiTextPrimary,
-                        cursorColor = OgiPrimaryDarkTheme
+                        focusedBorderColor = OgiAbAccent,
+                        unfocusedBorderColor = OgiAbBorder,
+                        focusedContainerColor = OgiAbPanel,
+                        unfocusedContainerColor = OgiAbPanel,
+                        focusedTextColor = OgiAbText,
+                        unfocusedTextColor = OgiAbText,
+                        cursorColor = OgiAbAccent,
+                        focusedLeadingIconColor = OgiAbAccent,
+                        unfocusedLeadingIconColor = OgiAbAccent
                     )
                 )
-                DropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false },
-                    modifier = Modifier.background(OgiSurfaceDark)
+                // Прозрачная зона клика по всему полю
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable { showVoiceSheet = true }
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Нижний лист со списком голосов: поиск сверху, крупные строки под палец
+            if (showVoiceSheet) {
+                ModalBottomSheet(
+                    onDismissRequest = { showVoiceSheet = false },
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                    containerColor = OgiAbSheet,
+                    contentColor = OgiAbText,
+                    scrimColor = Color(0x99000000),
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                    dragHandle = {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 10.dp)
+                                .width(36.dp)
+                                .height(4.dp)
+                                .background(Color(0xFF3F3F46), RoundedCornerShape(2.dp))
+                        )
+                    }
                 ) {
-                    // Показываем отфильтрованные голоса для текущего языка
-                    if (filteredVoices.isNotEmpty()) {
-                        filteredVoices.forEach { voice ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        getVoiceDisplayName(voice),
-                                        color = OgiTextPrimary
-                                    )
-                                },
-                                onClick = {
-                                    selectedVoice = voice
-                                    tts.voice = voice
-                                    expanded = false
-                                }
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // Заголовок листа (стиль A)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Голоса",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = OgiAbText
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "${displayVoices.size}",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = OgiAbTextFaint
                             )
                         }
-                    } else {
-                        // Если нет голосов для языка, показываем все доступные голоса
-                        DropdownMenuItem(
-                            text = {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        // Поиск по голосам
+                        OutlinedTextField(
+                            value = voiceQuery,
+                            onValueChange = { voiceQuery = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            placeholder = {
                                 Text(
-                                    "No voices for ${getLanguageName(detectedLanguage)}, showing all voices:",
-                                    color = OgiTextSecondary,
-                                    style = MaterialTheme.typography.bodySmall
+                                    "Поиск: язык или модель",
+                                    color = OgiAbTextFaint,
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                             },
-                            onClick = { /* Не кликабельно */ }
-                        )
-                        voices.sortedBy { it.name }.forEach { voice ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        getVoiceDisplayName(voice),
-                                        color = OgiTextPrimary
-                                    )
-                                },
-                                onClick = {
-                                    selectedVoice = voice
-                                    tts.voice = voice
-                                    expanded = false
+                            leadingIcon = {
+                                Icon(Icons.Filled.Search, contentDescription = null, tint = OgiAbTextMuted)
+                            },
+                            trailingIcon = {
+                                if (voiceQuery.isNotEmpty()) {
+                                    IconButton(onClick = { voiceQuery = "" }) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = "Очистить",
+                                            tint = OgiAbTextMuted
+                                        )
+                                    }
                                 }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = OgiAbAccent,
+                                unfocusedBorderColor = OgiAbBorder,
+                                focusedContainerColor = OgiAbPanel,
+                                unfocusedContainerColor = OgiAbPanel,
+                                focusedTextColor = OgiAbText,
+                                unfocusedTextColor = OgiAbText,
+                                cursorColor = OgiAbAccent,
+                                focusedLeadingIconColor = OgiAbTextMuted,
+                                unfocusedLeadingIconColor = OgiAbTextMuted
                             )
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (groupedVoices.isEmpty()) {
+                            Text(
+                                "Голоса не найдены",
+                                color = OgiAbTextMuted,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 460.dp)
+                            ) {
+                                groupedVoices.forEach { group ->
+                                    item(key = "group-${group.label}") {
+                                        Text(
+                                            "${group.label.uppercase()} — ${group.voices.size}",
+                                            color = OgiAbTextFaint,
+                                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.6.sp),
+                                            modifier = Modifier.padding(
+                                                start = 20.dp,
+                                                end = 20.dp,
+                                                top = 14.dp,
+                                                bottom = 4.dp
+                                            )
+                                        )
+                                    }
+                                    items(group.voices, key = { it.name }) { voice ->
+                                        val isSelected = voice.name == selectedVoice?.name
+                                        val genderBadge = when (voiceGenderLabel(voice)) {
+                                            "мужской" -> "♂"
+                                            "женский" -> "♀"
+                                            else -> null
+                                        }
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(min = 48.dp)
+                                                .clickable {
+                                                    selectVoice(voice)
+                                                    showVoiceSheet = false
+                                                }
+                                                .padding(start = 8.dp, end = 20.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // Акцентная полоска слева у выбранного голоса
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(2.dp)
+                                                    .heightIn(min = 28.dp)
+                                                    .background(
+                                                        if (isSelected) OgiAbAccent else Color.Transparent
+                                                    )
+                                            )
+                                            Text(
+                                                voiceLabels[voice.name] ?: getVoiceDisplayName(voice),
+                                                color = if (isSelected) OgiAbAccent else OgiAbText,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(start = 16.dp)
+                                            )
+                                            // Бейдж пола (стиль B)
+                                            if (genderBadge != null) {
+                                                VoiceBadge(text = genderBadge)
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                            }
+                                            if (isSelected) {
+                                                Icon(
+                                                    Icons.Filled.Check,
+                                                    contentDescription = null,
+                                                    tint = OgiAbAccent
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Статус-индикаторы с цветовой кодировкой
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "Detected language: ${getLanguageName(detectedLanguage)}",
-                    color = OgiSecondaryDarkTheme,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Text(
-                    "Available voices: ${filteredVoices.size}",
-                    color = if (filteredVoices.isNotEmpty()) OgiSuccess else OgiTextSecondary,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
+            // Карточка состояния движка (стиль B) — выше чипов, как в макете
+            EngineStatusCard(
+                isSynthesizing = isSynthesizing,
+                isPlaying = isPlaying,
+                ttsReady = ttsReady
+            )
+            Spacer(modifier = Modifier.height(10.dp))
 
-            Row(
+            // Чипы статуса (стиль A)
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text(
-                    "TTS Status: ${if (ttsReady) "Ready" else "Initializing..."}",
-                    color = if (ttsReady) OgiSuccess else OgiTextSecondary,
-                    style = MaterialTheme.typography.bodyMedium
+                StatusChip(text = "Язык: ${getLanguageName(detectedLanguage)}", accent = true)
+                StatusChip(text = "Голосов: ${filteredVoices.size} / ${voices.size}")
+                StatusChip(text = engineLabel)
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Поле текста (стиль B): плейсхолдер сверху, счётчик — в углу
+            val textInteractionSource = remember { MutableInteractionSource() }
+            val textFocused by textInteractionSource.collectIsFocusedAsState()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(OgiAbPanel)
+                    .border(
+                        1.dp,
+                        if (textFocused) OgiAbAccent else OgiAbBorder,
+                        RoundedCornerShape(8.dp)
+                    )
+            ) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 26.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = OgiAbText),
+                    cursorBrush = SolidColor(OgiAbAccent),
+                    interactionSource = textInteractionSource,
+                    enabled = !isLoading && !isSynthesizing,
+                    decorationBox = { innerField ->
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            if (text.isEmpty()) {
+                                Text(
+                                    "Введите текст для озвучки…",
+                                    color = OgiAbTextFaint,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.align(Alignment.TopStart)
+                                )
+                            }
+                            innerField()
+                        }
+                    }
                 )
                 Text(
-                    "Selected: ${selectedVoice?.let { detectVoiceGender(it.name) } ?: "none"}",
-                    color = OgiTextSecondary,
-                    style = MaterialTheme.typography.bodyMedium
+                    "${text.length} симв.",
+                    color = OgiAbTextFaint,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 12.dp, bottom = 8.dp)
                 )
             }
             Spacer(modifier = Modifier.height(16.dp))
+            if (isLoading) {
+                Text(
+                    "Загрузка файла…",
+                    color = OgiAbTextMuted,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            if (isSynthesizing) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        color = OgiAbAccent,
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Синтез речи…",
+                        color = OgiAbTextMuted,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Улучшенная панель управления
+            // Нижняя панель действий (стиль A)
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(OgiSurfaceDark.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Кнопка Play/Stop
-                IconButton(
+                // Play / Stop — акцентный квадрат
+                AppIconButton(
+                    icon = if (isPlaying) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                    contentDescription = if (isPlaying) "Стоп" else "Прослушать",
                     onClick = {
                         if (isPlaying) {
                             tts.stop()
                             (context as? MainActivity)?.isPlaying = false
                         } else {
                             selectedVoice?.let {
-                                val textToSpeak = if (text.isNotBlank()) text else "Enter text to listen"
+                                val textToSpeak = if (text.isNotBlank()) text else "Введите текст для прослушивания"
                                 val params = Bundle().apply {
                                     putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "tts_playback")
                                 }
@@ -761,139 +1112,72 @@ fun MainScreen(voices: Set<Voice>, tts: TextToSpeech, isSynthesizing: Boolean, o
                             }
                         }
                     },
-                    enabled = selectedVoice != null && ttsReady && !isSynthesizing,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(
-                            if (selectedVoice != null && ttsReady && !isSynthesizing)
-                                OgiPrimaryDarkTheme else OgiTextSecondary,
-                            CircleShape
-                        )
-                ) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Filled.Stop else Icons.Filled.PlayArrow,
-                        contentDescription = if (isPlaying) "Stop" else "Play",
-                        tint = Color.Black
-                    )
-                }
+                    accent = true,
+                    enabled = selectedVoice != null && ttsReady && !isSynthesizing
+                )
 
-                // Кнопка импорта файла
-                IconButton(
+                // Импорт файла
+                GhostIconButton(
+                    icon = Icons.Filled.FileUpload,
+                    contentDescription = "Импорт файла",
                     onClick = {
                         filePickerLauncher.launch(arrayOf("text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
-                    },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(OgiPrimaryDarkTheme, CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.FileUpload,
-                        contentDescription = "Import file",
-                        tint = Color.Black
-                    )
-                }
-
-                // Кнопка показать/скрыть аудио
-                IconButton(
-                    onClick = { showAudioList = !showAudioList },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(OgiPrimaryDarkTheme, CircleShape)
-                ) {
-                    Icon(
-                        imageVector = if (showAudioList) Icons.Filled.AudioFile else Icons.AutoMirrored.Filled.QueueMusic,
-                        contentDescription = if (showAudioList) "Hide audio" else "Show audio",
-                        tint = Color.Black
-                    )
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                // Кнопка инструкций
-                IconButton(
-                    onClick = {
-                        // Показать диалог с инструкциями
-                        showInstructionsDialog = true
-                    },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(OgiPrimaryDarkTheme, CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Info,
-                        contentDescription = "Instructions",
-                        tint = Color.Black
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Text to synthesize", color = OgiTextSecondary) },
-                modifier = Modifier.weight(1f),
-                enabled = !isLoading && !isSynthesizing,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = OgiPrimaryDarkTheme,
-                    unfocusedBorderColor = OgiTextSecondary,
-                    focusedTextColor = OgiTextPrimary,
-                    unfocusedTextColor = OgiTextPrimary,
-                    cursorColor = OgiPrimaryDarkTheme,
-                    focusedContainerColor = OgiSurfaceDark,
-                    unfocusedContainerColor = OgiSurfaceDark
+                    }
                 )
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            if (isLoading) {
-                Text("Loading file...", color = OgiTextSecondary)
-            }
-            if (isSynthesizing) {
-                CircularProgressIndicator(color = OgiPrimaryDarkTheme)
-                Text("Synthesizing speech...", color = OgiTextSecondary)
-            }
-            Spacer(modifier = Modifier.height(16.dp))
 
-            // Нижняя панель с основными действиями
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Кнопка Export (экспорт аудио)
+                // Показать / скрыть аудиофайлы
+                GhostIconButton(
+                    icon = if (showAudioList) Icons.Filled.AudioFile else Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = if (showAudioList) "Скрыть аудио" else "Показать аудио",
+                    onClick = { showAudioList = !showAudioList }
+                )
+
+                // Инструкции
+                GhostIconButton(
+                    icon = Icons.Filled.Info,
+                    contentDescription = "Инструкции",
+                    onClick = { showInstructionsDialog = true }
+                )
+
+                // Основное действие
                 Button(
                     onClick = {
                         onSynthesize(text)
                         refreshAudioList++
                     },
                     enabled = text.isNotBlank() && selectedVoice != null && !isSynthesizing && ttsReady,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = OgiPrimaryDarkTheme,
+                        containerColor = OgiAbAccent,
                         contentColor = Color.Black,
-                        disabledContainerColor = OgiTextSecondary
+                        disabledContainerColor = OgiAbPanel,
+                        disabledContentColor = OgiAbTextFaint
                     ),
-                    shape = RoundedCornerShape(16.dp),
-                    elevation = ButtonDefaults.buttonElevation(
-                        defaultElevation = 4.dp,
-                        pressedElevation = 8.dp
-                    )
+                    shape = RoundedCornerShape(8.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Download,
-                        contentDescription = "Export",
-                        modifier = Modifier.size(20.dp),
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
                         tint = Color.Black
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Export Audio")
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "Озвучить",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Files saved to: Downloads/TTS_Audio",
-                style = MaterialTheme.typography.bodySmall,
-                color = OgiTextSecondary,
+                text = "Файлы: Downloads/TTS_Audio",
+                style = MaterialTheme.typography.labelSmall,
+                color = OgiAbTextFaint,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -1011,16 +1295,34 @@ fun AudioFileItem(file: File, context: Context, onRefresh: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .clip(RoundedCornerShape(8.dp))
+            .background(OgiAbPanel)
+            .border(1.dp, OgiAbBorder, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // File name with improved styling
+        // Иконка файла
+        Icon(
+            imageVector = Icons.Filled.AudioFile,
+            contentDescription = null,
+            tint = OgiAbTextFaint,
+            modifier = Modifier.size(16.dp)
+        )
+        // Время создания (все файлы имеют вид tts_audio_<время>.wav)
         Text(
-            text = file.name,
+            text = formatFileTime(file.lastModified()),
             modifier = Modifier.weight(1f),
-            color = OgiTextPrimary,
-            style = MaterialTheme.typography.bodyLarge
+            color = OgiAbText,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        // Размер файла
+        Text(
+            text = formatFileSize(file.length()),
+            color = OgiAbTextFaint,
+            style = MaterialTheme.typography.labelSmall
         )
 
         // Play/Stop Button - Blue (#64B5F6)
@@ -1044,14 +1346,12 @@ fun AudioFileItem(file: File, context: Context, onRefresh: () -> Unit) {
                     isPlaying = false
                 }
             },
-            modifier = Modifier
-                .size(40.dp)
-                .background(OgiPrimaryDarkTheme, CircleShape)
+            modifier = Modifier.size(32.dp)
         ) {
             Icon(
                 imageVector = if (isPlaying) Icons.Filled.Stop else Icons.Filled.PlayArrow,
-                contentDescription = if (isPlaying) "Stop" else "Play",
-                tint = Color.Black
+                contentDescription = if (isPlaying) "Стоп" else "Воспроизвести",
+                tint = OgiAbAccent
             )
         }
 
@@ -1091,14 +1391,12 @@ fun AudioFileItem(file: File, context: Context, onRefresh: () -> Unit) {
                     Toast.makeText(context, "Ошибка: ${e.localizedMessage ?: e.message}", Toast.LENGTH_SHORT).show()
                 }
             },
-            modifier = Modifier
-                .size(40.dp)
-                .background(OgiSecondaryDarkTheme, CircleShape)
+            modifier = Modifier.size(32.dp)
         ) {
             Icon(
                 imageVector = Icons.Filled.Share,
-                contentDescription = "Share",
-                tint = Color.White
+                contentDescription = "Поделиться",
+                tint = OgiAbTextMuted
             )
         }
 
@@ -1122,14 +1420,12 @@ fun AudioFileItem(file: File, context: Context, onRefresh: () -> Unit) {
                     Toast.makeText(context, "Ошибка удаления: ${e.localizedMessage ?: e.message}", Toast.LENGTH_SHORT).show()
                 }
             },
-            modifier = Modifier
-                .size(40.dp)
-                .background(OgiError, CircleShape)
+            modifier = Modifier.size(32.dp)
         ) {
             Icon(
                 imageVector = Icons.Filled.Delete,
-                contentDescription = "Delete",
-                tint = Color.White
+                contentDescription = "Удалить",
+                tint = OgiAbTextMuted
             )
         }
     }
@@ -1153,5 +1449,197 @@ fun Greeting(name: String, modifier: Modifier = Modifier) {
 fun GreetingPreview() {
     OGITTSAndroidTheme {
         Greeting("Android")
+    }
+}
+
+// ---------- Элементы стиля A+B (12.11.2026) ----------
+
+// Чип статуса (стиль A)
+@Composable
+fun StatusChip(text: String, accent: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (accent) OgiAbAccent.copy(alpha = 0.12f) else OgiAbPanel)
+            .border(
+                1.dp,
+                if (accent) OgiAbAccent.copy(alpha = 0.45f) else OgiAbBorder,
+                RoundedCornerShape(999.dp)
+            )
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    ) {
+        Text(
+            text = text,
+            color = if (accent) OgiAbAccent else OgiAbTextMuted,
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
+}
+
+// Карточка состояния движка (стиль B)
+@Composable
+fun EngineStatusCard(
+    isSynthesizing: Boolean,
+    isPlaying: Boolean,
+    ttsReady: Boolean
+) {
+    val statusText = when {
+        isSynthesizing -> "Синтез речи"
+        isPlaying -> "Воспроизведение"
+        ttsReady -> "Готов к озвучке"
+        else -> "Инициализация движка"
+    }
+    val statusColor = if (ttsReady || isSynthesizing || isPlaying) OgiAbOk else OgiAbTextMuted
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(OgiAbPanelAlt)
+            .border(1.dp, OgiAbBorderSoft, RoundedCornerShape(16.dp))
+            .padding(14.dp)
+    ) {
+        Text(
+            text = "Состояние движка",
+            color = OgiAbTextMuted,
+            style = MaterialTheme.typography.labelMedium
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(statusColor, CircleShape)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = statusText,
+                color = OgiAbText,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+            )
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        EngineWaveform(active = isSynthesizing || isPlaying)
+    }
+}
+
+// Анимированная волна в карточке состояния
+@Composable
+fun EngineWaveform(active: Boolean) {
+    val transition = rememberInfiniteTransition(label = "engineWave")
+    val heights = listOf(8, 15, 22, 11, 24, 17, 9, 19, 13, 7, 16, 21, 12, 8)
+    Row(
+        modifier = Modifier.height(26.dp),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        heights.forEachIndexed { index, h ->
+            val scale by transition.animateFloat(
+                initialValue = 0.3f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 620 + index * 70, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "waveBar$index"
+            )
+            val factor = if (active) scale else 0.35f
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height((h * factor).dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(OgiAbAccent.copy(alpha = if (active) 0.9f else 0.45f))
+            )
+        }
+    }
+}
+
+// Небольшой бейдж (стиль B)
+@Composable
+fun VoiceBadge(text: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(OgiAbPanel)
+            .border(1.dp, OgiAbBorder, RoundedCornerShape(6.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = text,
+            color = OgiAbTextFaint,
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
+}
+
+// Размер файла для списка: "12 KB", "1.4 MB"
+fun formatFileSize(bytes: Long): String = when {
+    bytes >= 1024 * 1024 -> String.format("%.1f MB", bytes / 1024.0 / 1024.0)
+    bytes >= 1024 -> "${bytes / 1024} KB"
+    else -> "$bytes B"
+}
+
+// Время создания файла для списка: "12 ноя 13:25" (коротко, без локали)
+private val MONTHS_SHORT = arrayOf(
+    "янв", "фев", "мар", "апр", "мая", "июн",
+    "июл", "авг", "сен", "окт", "ноя", "дек"
+)
+
+fun formatFileTime(millis: Long): String {
+    val cal = Calendar.getInstance()
+    cal.timeInMillis = millis
+    return "${cal.get(Calendar.DAY_OF_MONTH)} ${MONTHS_SHORT[cal.get(Calendar.MONTH)]} " +
+        String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+}
+
+// Кнопка-призрак (стиль A)
+@Composable
+fun GhostIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit
+) {
+    AppIconButton(
+        icon = icon,
+        contentDescription = contentDescription,
+        onClick = onClick
+    )
+}
+
+// Квадратная кнопка 44dp: акцентная (Play) или с рамкой (призрак)
+@Composable
+fun AppIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    accent: Boolean = false,
+    enabled: Boolean = true
+) {
+    val shape = if (accent) CircleShape else RoundedCornerShape(8.dp)
+    val background = when {
+        !enabled -> OgiAbBorder
+        accent -> OgiAbAccent
+        else -> OgiAbPanel
+    }
+    val tint = when {
+        !enabled -> OgiAbTextFaint
+        accent -> Color.Black
+        else -> OgiAbTextMuted
+    }
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(shape)
+            .background(background)
+            .then(if (accent || !enabled) Modifier else Modifier.border(1.dp, OgiAbBorder, shape))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }

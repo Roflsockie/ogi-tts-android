@@ -19,8 +19,8 @@ private val DarkColorScheme = darkColorScheme(
     primary = OgiPrimaryDarkTheme,
     secondary = OgiSecondaryDarkTheme,
     tertiary = OgiAccent,
-    background = OgiBackgroundDark,
-    surface = OgiSurfaceDark,
+    background = OgiAbBackground,
+    surface = OgiAbPanelAlt,
     error = OgiError
 )
 
@@ -37,7 +37,7 @@ private val LightColorScheme = lightColorScheme(
 fun OGITTSAndroidTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -53,8 +53,11 @@ fun OGITTSAndroidTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.primary.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = darkTheme
+            // Статус-бар в стиле TUI: тёмный фон, без яркой полосы
+            window.statusBarColor = colorScheme.background.toArgb()
+            window.navigationBarColor = colorScheme.background.toArgb()
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !darkTheme
         }
     }
 
